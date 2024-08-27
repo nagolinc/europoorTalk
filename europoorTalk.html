@@ -62,6 +62,7 @@
     <script type="text/javascript" src="https://cdn.jsdelivr.net/gh/subins2000/p2pt/dist/p2pt.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/dchest/tweetnacl-js/nacl.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tweetnacl-util@0.15.1/nacl-util.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/dchest/ed2curve-js/ed2curve.min.js"></script>
     <div id="log"></div>
 
     Username:<input type="text" id="username" placeholder="Enter your username" />
@@ -124,9 +125,34 @@ p2pt.on('peerconnect', (peer) => {
 
 knownUsers = {}
 
+
+function attemptDecryptMessage(encryptedData, senderPublicKey) {
+    try {
+        const nonce = nacl.util.decodeBase64(encryptedData.nonce);
+        const cipherText = nacl.util.decodeBase64(encryptedData.cipherText);
+
+        // Attempt to decrypt with the recipient's private key and the sender's public key
+        const decryptedMessage = nacl.box.open(
+            cipherText,
+            nonce,
+            senderPublicKey,
+            globalKeyPair.secretKey
+        );
+
+        if (decryptedMessage) {
+            return nacl.util.encodeUTF8(decryptedMessage); // Convert the decrypted Uint8Array to a UTF-8 string
+        } else {
+            return null; // Decryption failed, meaning the message was not intended for this user
+        }
+    } catch (e) {
+        log('Error during decryption: ' + e.message);
+        return null;
+    }
+}
+
+
+
 p2pt.on('msg', (peer, msg) => {
-
-
     log(`Got message from ${peer.id} : ${msg}`);
 
     try {
@@ -136,15 +162,41 @@ p2pt.on('msg', (peer, msg) => {
         // Check if the message type is 'userInfo'
         if (data.messageType === 'userInfo') {
             const userKey = `${data.username}#${data.hash}`;
-            knownUsers[userKey] = data; // Store user data under the username#hash key
+            knownUsers[userKey] = { ...data, peerId: peer.id }; // Store user data and peerId
             log(`User Info received and stored for ${data.username}`);
             displayUser(data); // Display this user in the knownUsers div
+        }
+
+        // Check if the message type is 'encrypted'
+        else if (data.messageType === 'encrypted') {
+            // Find the public key corresponding to the peer.id
+            let senderPublicKey = null;
+            for (const key in knownUsers) {
+                if (knownUsers[key].peerId === peer.id) {
+                    senderPublicKey = nacl.util.decodeBase64(knownUsers[key].publicKey);
+                    break;
+                }
+            }
+
+            if (senderPublicKey) {
+                const decryptedMessage = attemptDecryptMessage(data.data, senderPublicKey);
+                if (decryptedMessage) {
+                    //remove leading AAAAA
+                    decryptedMessage = decryptedMessage.slice(5);
+                    log(`Decrypted message: ${decryptedMessage}`);
+                } else {
+                    log('Failed to decrypt the message or message was not intended for this user.');
+                }
+            } else {
+                log('Public key for sender not found.');
+            }
         }
     } catch (e) {
         // If it's not JSON or another error occurs, log the message normally
         console.log(e);
     }
 });
+
 
 function displayUser(userData) {
     const userDiv = document.getElementById('knownUsers');
@@ -230,9 +282,14 @@ async function deriveSeed(username, password) {
 
 async function generateKeyPair(username, password) {
     const seed = await deriveSeed(username, password); // Derive the seed from username and password
-    const keyPair = nacl.sign.keyPair.fromSeed(seed); // Generate the key pair using the seed
-    return keyPair;
+    const ed25519KeyPair = nacl.sign.keyPair.fromSeed(seed); // Generate the signing key pair using the seed
+    const curve25519KeyPair = {
+        publicKey: ed2curve.convertPublicKey(ed25519KeyPair.publicKey),
+        secretKey: ed2curve.convertSecretKey(ed25519KeyPair.secretKey)
+    };
+    return curve25519KeyPair;
 }
+
 
 function bufferToHex(buffer) {
     return Array.from(new Uint8Array(buffer), byte => byte.toString(16).padStart(2, '0')).join('');
@@ -246,13 +303,13 @@ async function hashPublicKey(publicKey) {
 async function login(username, password) {
     try {
         const keyPair = await generateKeyPair(username, password);
-        globalKeyPair = keyPair; // Store the key pair in the global variable
+        globalKeyPair = keyPair; // Store the Curve25519 key pair in the global variable
         const publicKeyHash = await hashPublicKey(keyPair.publicKey);
 
         const userInfo = JSON.stringify({
             messageType: 'userInfo',
             username: username,
-            publicKey: bufferToHex(keyPair.publicKey), // Convert public key to hex string for broadcasting
+            publicKey: nacl.util.encodeBase64(keyPair.publicKey), // Convert public key to base64 for broadcasting
             hash: publicKeyHash
         });
 
@@ -299,6 +356,7 @@ function encryptMessage(message, recipientPublicKey) {
         cipherText: nacl.util.encodeBase64(encryptedMessage)
     };
 }
+
 
 async function sendEncrypted(msg) {
     try {
