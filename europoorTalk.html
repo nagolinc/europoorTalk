@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EuropoorTalk</title>
+    <style>
+        #log {
+            height: 300px;
+            overflow-y: scroll;
+            background-color: #f0f0f0;
+            padding: 10px;
+            border: 1px solid #ccc;
+        }
+        
+        #messageBox {
+            width: 100%;
+            height: 200px;
+            padding: 10px;
+            font-size: 16px;
+            border: 2px solid #ccc;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            resize: vertical; /* Allows vertical resizing */
+            font-family: Arial, sans-serif;
+        }
+        
+        #messageBox:focus {
+            border-color: #66afe9;
+            outline: none;
+            box-shadow: 0 0 8px rgba(102, 175, 233, 0.6);
+        }
+
+
+        .user {
+            padding: 5px 10px;
+            margin: 2px 0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+            transition: background-color 0.3s ease;
+        }
+        
+        .user:hover {
+            background-color: #e8e8e8;
+        }
+        
+        .selected {
+            background-color: #b0c4de;
+            color: white;
+            border-color: #8a9bb3;
+        }
+
+
+
+    </style>
+</head>
+<body>
+    <h1>EuropoorTalk</h1>
+    <div id="log"></div>
+    
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/gh/subins2000/p2pt/dist/p2pt.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/dchest/tweetnacl-js/nacl.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tweetnacl-util@0.15.1/nacl-util.min.js"></script>
+    <div id="log"></div>
+
+    Username:<input type="text" id="username" placeholder="Enter your username" />
+    Password:<input type="password" id="password" placeholder="Enter your password" />
+    <button id="loginButton">Login</button>
+    <br>
+
+    <div id="knownUsers"></div>
+
+    <textarea id="messageBox" placeholder="Type a message"></textarea>
+
+    <input type="hidden" id="selectedUser" />
+
+    <button id="sendButton">Send</button>
+
+
+    <script>
+        let logger = document.getElementById('log');
+log = msg => {
+  if (typeof msg == 'object') {
+    logger.innerHTML += (JSON && JSON.stringify ? JSON.stringify(msg, undefined, 2) : msg) + '<br />';
+  } else {
+    logger.innerHTML += msg + '<br />';
+  }
+}
+
+// Find public WebTorrent tracker URLs here : https://github.com/ngosang/trackerslist/blob/master/trackers_all_ws.txt
+var trackersAnnounceURLs = [
+  'wss://tracker.openwebtorrent.com',
+  'wss://tracker.webtorrent.dev',
+  'wss://tracker.files.fm:7073/announce',
+  'wss://tracker.btorrent.xyz/',
+]
+
+// This 'myApp' is called identifier and should be unique to your app
+var p2pt = new P2PT(trackersAnnounceURLs, 'EuropoorTalk')
+
+// If a tracker connection was successful
+p2pt.on('trackerconnect', (tracker, stats) => {
+  log('Connected to tracker : ' + tracker.announceUrl)
+  log('Tracker stats : ' + JSON.stringify(stats))
+  log('')
+})
+
+allPeers=[]
+
+// If a new peer, send message
+p2pt.on('peerconnect', (peer) => {
+
+    allPeers.push(peer)
+
+  log('New Peer ! : ' + peer.id + '. Sending Hi')
+  this.p2pt.send(peer, 'Hi').then(([peer, msg]) => {
+    log('Got response : ' + msg)
+    return peer.respond('Bye')
+  }).then(([peer, msg]) => {
+    log('Got response2 : ' + msg)
+  })
+})
+
+knownUsers = {}
+
+p2pt.on('msg', (peer, msg) => {
+
+
+    log(`Got message from ${peer.id} : ${msg}`);
+
+    try {
+        // Attempt to parse the incoming message as JSON
+        const data = JSON.parse(msg);
+
+        // Check if the message type is 'userInfo'
+        if (data.messageType === 'userInfo') {
+            const userKey = `${data.username}#${data.hash}`;
+            knownUsers[userKey] = data; // Store user data under the username#hash key
+            log(`User Info received and stored for ${data.username}`);
+            displayUser(data); // Display this user in the knownUsers div
+        }
+    } catch (e) {
+        // If it's not JSON or another error occurs, log the message normally
+        console.log(e);
+    }
+});
+
+function displayUser(userData) {
+    const userDiv = document.getElementById('knownUsers');
+    const userElement = document.createElement('div');
+
+    //add a class here for styling
+    userElement.classList.add('user');
+
+    userElement.textContent = `${userData.username} (${userData.hash})`; // Display username and part of the hash
+    userElement.id = `user-${userData.username}`;
+    userElement.style.cursor = 'pointer';
+    userElement.onclick = () => {
+        const userKey = `${userData.username}#${userData.hash}`;
+        document.getElementById('selectedUser').value = userKey
+        //add a class to indicate that this user is selected
+        document.querySelectorAll('.user').forEach(user => user.classList.remove('selected'));
+        userElement.classList.add('selected');
+    };
+    userDiv.appendChild(userElement);
+    log(`Displayed user ${userData.username} in known users list.`);
+}
+
+
+//function to add a 'none' user to the knownUsers div
+function displayNoneUser() {
+    const userDiv = document.getElementById('knownUsers');
+    const userElement = document.createElement('div');
+
+    //add a class here for styling
+    userElement.classList.add('user');
+
+    userElement.textContent = 'None';
+    userElement.id = 'user-none';
+    userElement.style.cursor = 'pointer';
+    userElement.onclick = () => {
+        document.getElementById('selectedUser').value = '';
+        document.querySelectorAll('.user').forEach(user => user.classList.remove('selected'));
+        userElement.classList.add('selected');
+    };
+    userDiv.appendChild(userElement);
+}
+
+displayNoneUser();
+
+
+log('P2PT started. My peer id : ' + p2pt._peerId)
+p2pt.start()
+
+function broadcast(message) {
+    allPeers.forEach(peer => {
+        p2pt.send(peer, message)
+    })
+}
+
+
+//button click event
+document.getElementById('sendButton').addEventListener('click', () => {
+    var message = document.getElementById('messageBox').value
+
+    //check if selected user is 'none'
+    if (document.getElementById('selectedUser').value === '') {
+        log('No user selected.')
+        broadcast(message)
+    }else{
+        sendEncrypted(message)
+    }
+    
+    log('Sent message : ' + message)
+    document.getElementById('messageBox').value = ''
+})
+
+
+//login button
+let globalKeyPair; // Global variable to store the key pair
+
+
+async function deriveSeed(username, password) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(username + password);
+    const hash = await crypto.subtle.digest('SHA-256', data);
+    return new Uint8Array(hash).slice(0, 32); // Use the first 32 bytes for the seed
+}
+
+async function generateKeyPair(username, password) {
+    const seed = await deriveSeed(username, password); // Derive the seed from username and password
+    const keyPair = nacl.sign.keyPair.fromSeed(seed); // Generate the key pair using the seed
+    return keyPair;
+}
+
+function bufferToHex(buffer) {
+    return Array.from(new Uint8Array(buffer), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function hashPublicKey(publicKey) {
+    const hashBuffer = await crypto.subtle.digest('SHA-256', publicKey);
+    return bufferToHex(hashBuffer);
+}
+
+async function login(username, password) {
+    try {
+        const keyPair = await generateKeyPair(username, password);
+        globalKeyPair = keyPair; // Store the key pair in the global variable
+        const publicKeyHash = await hashPublicKey(keyPair.publicKey);
+
+        const userInfo = JSON.stringify({
+            messageType: 'userInfo',
+            username: username,
+            publicKey: bufferToHex(keyPair.publicKey), // Convert public key to hex string for broadcasting
+            hash: publicKeyHash
+        });
+
+        broadcast(userInfo);
+        log('Login successful. Broadcasted user info. Key pair stored globally.');
+    } catch (error) {
+        log('Error during login: ' + error.message);
+    }
+}
+
+document.getElementById('loginButton').addEventListener('click', () => {
+    const username = document.getElementById('username').value;
+    const password = document.getElementById('password').value;
+    login(username, password);
+});
+
+
+
+function padMessage(msg) {
+    const padLength = 256 - (msg.length % 256);
+    return msg + ' '.repeat(padLength);
+}
+
+function addRandomSuffix() {
+    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+    let result = '';
+    for (let i = 0; i < 256; i++) {
+        result += characters.charAt(Math.floor(Math.random() * characters.length));
+    }
+    return result;
+}
+
+// Assumes the use of TweetNaCl.js for encryption
+function encryptMessage(message, recipientPublicKey) {
+    const nonce = nacl.randomBytes(nacl.box.nonceLength);
+    const encryptedMessage = nacl.box(
+        nacl.util.decodeUTF8(message),
+        nonce,
+        recipientPublicKey,
+        globalKeyPair.secretKey
+    );
+    return {
+        nonce: nacl.util.encodeBase64(nonce),
+        cipherText: nacl.util.encodeBase64(encryptedMessage)
+    };
+}
+
+async function sendEncrypted(msg) {
+    try {
+        const selectedUserKey = document.getElementById('selectedUser').value;
+        if (!selectedUserKey || !knownUsers[selectedUserKey]) {
+            log('No user selected or user not found.');
+            return;
+        }
+
+        const userInfo = knownUsers[selectedUserKey];
+        const recipientPublicKey = nacl.util.decodeBase64(userInfo.publicKey);
+
+        // Step 2: Pad the message to be a multiple of 256 characters
+        let paddedMessage = padMessage(msg);
+        // Step 3: Add 'AAAAA' at the beginning
+        paddedMessage = 'AAAAA' + paddedMessage;
+        // Step 4: Add 256 random letters at the end
+        paddedMessage += addRandomSuffix();
+
+        // Step 5: Encrypt the message
+        const encryptedData = encryptMessage(paddedMessage, recipientPublicKey);
+
+        // Step 6: Broadcast the encrypted message
+        const messageToBroadcast = JSON.stringify({
+            messageType: 'encrypted',
+            data: encryptedData
+        });
+
+        broadcast(messageToBroadcast);
+        log('Encrypted message sent.');
+    } catch (error) {
+        log(`Error sending encrypted message: ${error.message}`);
+    }
+}
+
+
+
+
+
+    </script>
+</body>
+</html>
